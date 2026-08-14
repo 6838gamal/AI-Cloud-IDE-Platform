@@ -6,7 +6,7 @@ import logging
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
-from app.dependencies import require_user_ws
+#from app.dependencies import require_user_ws
 from app.modules.docker.services import DockerService
 from app.modules.projects.services import ProjectService
 from app.modules.terminal.services import TerminalService
