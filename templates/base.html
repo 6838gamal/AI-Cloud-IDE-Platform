@@ -1,0 +1,16 @@
+<!DOCTYPE html>
+<html lang="{{ user.language if user else default_language }}" dir="{{ 'rtl' if (user.language if user else default_language) == 'ar' else 'ltr' }}" data-theme="{{ user.theme if user else default_theme }}">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}{{ app_name }}{% endblock %}</title>
+    <link rel="stylesheet" href="/static/css/app.css">
+    <link rel="stylesheet" href="/static/css/components.css">
+    {% block extra_head %}{% endblock %}
+</head>
+<body>
+    {% block body %}{% endblock %}
+    <script src="/static/js/app.js"></script>
+    {% block extra_scripts %}{% endblock %}
+</body>
+</html>

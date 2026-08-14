@@ -1,0 +1,15 @@
+<aside class="chat-panel" id="chat-panel">
+    <div class="chat-header">
+        <span class="chat-title" data-i18n="ai_chat">AI Chat</span>
+        <div class="chat-status" id="ai-status"></div>
+    </div>
+    <div class="chat-messages" id="chat-messages">
+        <div class="chat-empty" data-i18n="chat_empty">Ask AI to build or modify your project</div>
+    </div>
+    <div class="chat-input-area">
+        <textarea id="chat-input" class="chat-input" placeholder="Type your request..." rows="2"></textarea>
+        <button class="btn-send" id="btn-send" onclick="sendChatMessage()">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
+        </button>
+    </div>
+</aside>

@@ -1,0 +1,7 @@
+FROM ghcr.io/cirrusci/flutter:stable
+
+WORKDIR /workspace
+
+RUN flutter config --no-analytics && dart --disable-analytics
+
+CMD ["sleep", "infinity"]

@@ -1,0 +1,16 @@
+<div class="preview-panel hidden" id="preview-panel">
+    <div class="preview-header">
+        <span class="preview-title" data-i18n="preview">Preview</span>
+        <div class="preview-actions">
+            <button class="icon-btn-sm" onclick="refreshPreview()" title="Refresh">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M23 4v6h-6"/><path d="M20.49 15a9 9 0 0 1-14.85 3.36L1 14"/></svg>
+            </button>
+            <button class="icon-btn-sm" onclick="togglePanel('preview')" title="Close">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+            </button>
+        </div>
+    </div>
+    <div class="preview-body" id="preview-body">
+        <div class="preview-placeholder" data-i18n="preview_empty">Run your project to see preview</div>
+    </div>
+</div>

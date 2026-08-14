@@ -1,0 +1,54 @@
+.context-menu {
+  position: fixed; background: var(--bg-secondary); border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm); padding: 4px; min-width: 160px; z-index: 2000;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+}
+.context-menu-item {
+  padding: 6px 12px; cursor: pointer; font-size: 13px; border-radius: var(--radius-sm);
+  display: flex; align-items: center; gap: 8px; color: var(--text-primary);
+}
+.context-menu-item:hover { background: var(--bg-hover); }
+.context-menu-item.danger { color: var(--error); }
+.context-menu-divider { height: 1px; background: var(--border-color); margin: 4px 0; }
+
+.notification {
+  position: fixed; bottom: 20px; right: 20px; padding: 12px 20px;
+  border-radius: var(--radius); font-size: 13px; z-index: 3000;
+  animation: slideIn 0.3s ease;
+}
+.notification.success { background: var(--success); color: #fff; }
+.notification.error { background: var(--error); color: #fff; }
+.notification.info { background: var(--accent-color); color: #fff; }
+.notification.warning { background: var(--warning); color: #1a1b26; }
+
+@keyframes slideIn {
+  from { transform: translateX(100%); opacity: 0; }
+  to { transform: translateX(0); opacity: 1; }
+}
+
+.loading-spinner {
+  display: inline-block; width: 16px; height: 16px; border: 2px solid var(--border-color);
+  border-top-color: var(--accent-color); border-radius: 50%; animation: spin 0.8s linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+
+.chat-msg.typing::after {
+  content: '...'; animation: typing 1s infinite;
+}
+@keyframes typing { 0%, 100% { opacity: 1; } 50% { opacity: 0.3; } }
+
+.diff-viewer {
+  background: var(--bg-secondary); border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm); padding: 12px; margin: 8px 0;
+  font-family: var(--font-mono); font-size: 12px; overflow-x: auto;
+}
+.diff-line-add { color: var(--success); background: rgba(158, 206, 106, 0.1); }
+.diff-line-del { color: var(--error); background: rgba(247, 118, 142, 0.1); }
+.diff-line-context { color: var(--text-secondary); }
+
+@media (max-width: 768px) {
+  .sidebar { width: 200px; }
+  .chat-panel { width: 280px; }
+  .dashboard-title-row { flex-direction: column; gap: 12px; align-items: flex-start; }
+  .projects-grid { grid-template-columns: 1fr; }
+}

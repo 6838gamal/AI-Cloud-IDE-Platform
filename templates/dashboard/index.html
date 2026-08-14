@@ -1,0 +1,120 @@
+{% extends "base.html" %}
+{% block title %}{{ app_name }} - Dashboard{% endblock %}
+{% block body %}
+<div class="dashboard-container">
+    <header class="dashboard-header">
+        <div class="header-left">
+            <div class="logo">
+                <svg width="32" height="32" viewBox="0 0 48 48" fill="none">
+                    <rect x="6" y="6" width="36" height="36" rx="8" stroke="var(--accent-color)" stroke-width="2.5"/>
+                    <path d="M18 20L14 24L18 28" stroke="var(--accent-color)" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+                    <path d="M30 20L34 24L30 28" stroke="var(--accent-color)" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+                    <path d="M27 16L21 32" stroke="var(--accent-color)" stroke-width="2.5" stroke-linecap="round"/>
+                </svg>
+                <span>{{ app_name }}</span>
+            </div>
+        </div>
+        <div class="header-right">
+            <button class="icon-btn" onclick="toggleTheme()" title="Toggle theme">
+                <svg class="icon-moon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
+                <svg class="icon-sun" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>
+            </button>
+            <button class="icon-btn" onclick="toggleLanguage()" title="Toggle language">
+                <span id="lang-label">{{ user.language | upper }}</span>
+            </button>
+            <div class="user-menu">
+                {% if user.profile_picture %}
+                <img src="{{ user.profile_picture }}" alt="{{ user.name }}" class="user-avatar">
+                {% else %}
+                <div class="user-avatar-placeholder">{{ user.name[0] if user.name else 'U' }}</div>
+                {% endif %}
+                <div class="user-dropdown">
+                    <div class="user-info">
+                        <strong>{{ user.name }}</strong>
+                        <span>{{ user.email }}</span>
+                    </div>
+                    <form action="/auth/logout" method="POST">
+                        <button type="submit" class="btn-logout" data-i18n="logout">Logout</button>
+                    </form>
+                </div>
+            </div>
+        </div>
+    </header>
+
+    <main class="dashboard-main">
+        <div class="dashboard-content">
+            <div class="dashboard-title-row">
+                <h1 data-i18n="my_projects">My Projects</h1>
+                <button class="btn-primary" onclick="showNewProjectModal()" data-i18n="new_project">New Project</button>
+            </div>
+
+            <div id="projects-grid" class="projects-grid">
+                {% for project in projects %}
+                <a href="/workspace/{{ project.id }}" class="project-card">
+                    <div class="project-card-icon">
+                        {% if project.project_type in ['python', 'fastapi', 'flask', 'django', 'streamlit'] %}
+                        <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></svg>
+                        {% else %}
+                        <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></svg>
+                        {% endif %}
+                    </div>
+                    <div class="project-card-info">
+                        <h3>{{ project.name }}</h3>
+                        <p>{{ project.description or '' }}</p>
+                        <div class="project-card-meta">
+                            <span class="badge badge-{{ project.project_type }}">{{ project.project_type }}</span>
+                            <span class="status-dot status-{{ project.status }}"></span>
+                            <span class="status-text">{{ project.status }}</span>
+                        </div>
+                    </div>
+                </a>
+                {% endfor %}
+                {% if not projects %}
+                <div class="empty-state">
+                    <p data-i18n="no_projects">No projects yet. Create your first one!</p>
+                </div>
+                {% endif %}
+            </div>
+        </div>
+    </main>
+</div>
+
+<div id="new-project-modal" class="modal hidden">
+    <div class="modal-content">
+        <div class="modal-header">
+            <h2 data-i18n="create_project">Create Project</h2>
+            <button class="modal-close" onclick="hideNewProjectModal()">&times;</button>
+        </div>
+        <form id="new-project-form" onsubmit="createProject(event)">
+            <div class="form-group">
+                <label data-i18n="project_name">Project Name</label>
+                <input type="text" id="project-name" name="name" required maxlength="255">
+            </div>
+            <div class="form-group">
+                <label data-i18n="project_description">Description (optional)</label>
+                <textarea id="project-description" name="description" rows="3"></textarea>
+            </div>
+            <div class="form-group">
+                <label data-i18n="project_type">Project Type</label>
+                <select id="project-type" name="project_type">
+                    <option value="fastapi">FastAPI</option>
+                    <option value="python">Python</option>
+                    <option value="flask">Flask</option>
+                    <option value="django">Django</option>
+                    <option value="streamlit">Streamlit</option>
+                    <option value="flutter">Flutter</option>
+                </select>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn-secondary" onclick="hideNewProjectModal()" data-i18n="cancel">Cancel</button>
+                <button type="submit" class="btn-primary" data-i18n="create">Create</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<script>
+const currentUserId = "{{ user.id }}";
+</script>
+<script src="/static/js/app.js"></script>
+{% endblock %}
