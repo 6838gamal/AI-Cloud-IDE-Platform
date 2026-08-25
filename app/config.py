@@ -23,7 +23,7 @@ class Settings(BaseSettings):
     port: int = 8000
     debug: bool = True
     log_level: str = "INFO"
-    version: str = "1.0.0"  # أضفت هذا المتغير
+    version: str = "1.0.0"
 
     # Database
     database_url: str = "postgresql+asyncpg://postgres:postgres@db:5432/app"
@@ -68,8 +68,11 @@ class Settings(BaseSettings):
     rate_limit_requests: int = 100
     rate_limit_window: int = 60
 
+    # ===== الخصائص المحسوبة =====
+    
     @property
     def cors_origin_list(self) -> list[str]:
+        """قائمة عناوين CORS المسموح بها."""
         if not self.cors_origins:
             return []
         return [o.strip() for o in self.cors_origins.split(",") if o.strip()]
@@ -80,30 +83,33 @@ class Settings(BaseSettings):
         return bool(self.google_client_id and self.google_client_secret)
 
     @property
-    def google_configured_value(self) -> bool:
-        """نفس google_configured ولكن مع اسم مختلف لتجنب الالتباس."""
-        return self.google_configured
-
-    @property
     def ai_configured(self) -> bool:
+        """التحقق من تهيئة AI."""
         return bool(self.ai_provider and self.ai_api_key)
 
     @property
     def is_production(self) -> bool:
+        """التحقق من وضع الإنتاج."""
         return not self.debug
 
-    def get_template_vars(self) -> dict:
-        """إرجاع المتغيرات التي يمكن استخدامها في القوالب."""
+    @property
+    def template_vars(self) -> dict:
+        """
+        إرجاع متغيرات آمنة للاستخدام في القوالب.
+        جميع القيم من أنواع بسيطة (str, bool) لتجنب مشاكل التجزئة (hashing).
+        """
         return {
-            "app_name": self.app_name,
-            "app_version": self.version,
-            "default_language": self.default_language,
-            "default_theme": self.default_theme,
-            "google_configured": self.google_configured,
-            "debug": self.debug,
+            "app_name": str(self.app_name),
+            "app_version": str(self.version),
+            "default_language": str(self.default_language),
+            "default_theme": str(self.default_theme),
+            "google_configured": bool(self.google_configured),
+            "debug": bool(self.debug),
+            "session_cookie_name": str(self.session_cookie_name),
         }
 
     def warn_insecure_defaults(self) -> list[str]:
+        """التحقق من الإعدادات غير الآمنة في وضع الإنتاج."""
         issues: list[str] = []
         if self.is_production:
             if self.secret_key == "dev-secret-key":
@@ -117,24 +123,36 @@ class Settings(BaseSettings):
 
 @lru_cache
 def get_settings() -> Settings:
+    """الحصول على كائن الإعدادات مع التخزين المؤقت."""
     return Settings()
 
 
+# ===== إنشاء كائن الإعدادات العالمي =====
 settings = get_settings()
 
-# ===== تحقق من الإعدادات عند التحميل =====
+
+# ===== دالة التحقق من الإعدادات =====
 def validate_settings():
-    """التحقق من صحة الإعدادات وطباعة تحذيرات."""
+    """التحقق من صحة الإعدادات وطباعة معلومات التصحيح."""
     print("=" * 50)
     print("🔧 Application Settings")
     print("=" * 50)
     print(f"App Name: {settings.app_name}")
+    print(f"Version: {settings.version}")
     print(f"Debug Mode: {settings.debug}")
-    print(f"Database: {settings.database_url.split('@')[0] if '@' in settings.database_url else settings.database_url}...")
+    
+    # إخفاء تفاصيل قاعدة البيانات
+    db_url = settings.database_url
+    if "@" in db_url:
+        parts = db_url.split("@")
+        db_url = f"{parts[0].split('://')[0]}://***@{parts[1]}"
+    print(f"Database: {db_url}")
+    
     print(f"Google OAuth: {'✅ Configured' if settings.google_configured else '❌ Not Configured'}")
-    print(f"AI Provider: {settings.ai_provider if settings.ai_configured else '❌ Not Configured'}")
+    print(f"AI Provider: {'✅ Configured' if settings.ai_configured else '❌ Not Configured'}")
     print(f"Default Theme: {settings.default_theme}")
     print(f"Default Language: {settings.default_language}")
+    print(f"Session Cookie: {settings.session_cookie_name}")
     print("=" * 50)
     
     # التحذيرات
@@ -145,20 +163,18 @@ def validate_settings():
             print(f"   - {warning}")
         print("=" * 50)
 
-# تنفيذ التحقق عند التحميل (يمكنك تعليق هذا السطر إذا كان يسبب مشاكل)
+
+# ===== دالة مساعدة للحصول على إعدادات القالب =====
+def get_template_settings() -> dict:
+    """
+    إرجاع إعدادات آمنة للاستخدام في القوالب.
+    هذه الدالة مخصصة للاستخدام في routes.
+    """
+    return settings.template_vars
+
+
+# ===== تنفيذ التحقق عند التحميل =====
 try:
     validate_settings()
 except Exception as e:
     print(f"⚠️ Settings validation error: {e}")
-
-# ===== دالة مساعدة للحصول على إعدادات القالب بأمان =====
-def get_template_settings() -> dict:
-    """إرجاع إعدادات آمنة للاستخدام في القوالب."""
-    return {
-        "app_name": settings.app_name,
-        "app_version": getattr(settings, "version", "1.0.0"),
-        "default_language": settings.default_language,
-        "default_theme": settings.default_theme,
-        "google_configured": bool(settings.google_configured),
-        "debug": settings.debug,
-    }
