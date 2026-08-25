@@ -7,7 +7,7 @@ from fastapi.templating import Jinja2Templates
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.common.security import create_signed_payload, verify_signed_payload
-from app.config import settings
+from app.config import settings, get_template_settings
 from app.database import get_db
 from app.dependencies import CurrentUser, DbSession
 from app.modules.auth.services import AuthService
@@ -25,85 +25,149 @@ TEMPLATES_DIR = BASE_DIR / "templates"
 if not TEMPLATES_DIR.exists():
     # محاولة مسار بديل
     TEMPLATES_DIR = Path(__file__).resolve().parent.parent / "templates"
+    
+    if not TEMPLATES_DIR.exists():
+        # محاولة مسار آخر
+        TEMPLATES_DIR = Path(__file__).resolve().parent / "templates"
 
 print(f"📁 Templates directory: {TEMPLATES_DIR}")
 print(f"✅ templates/auth/login.html exists: {(TEMPLATES_DIR / 'auth' / 'login.html').exists()}")
+print(f"✅ templates/base.html exists: {(TEMPLATES_DIR / 'base.html').exists()}")
 
 templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
 
 
 # ===== دالة مساعدة لإنشاء سياق القالب =====
 def get_template_context(request: Request, extra: dict = None) -> dict:
-    """إنشاء سياق القالب الأساسي مع المتغيرات العامة."""
+    """
+    إنشاء سياق القالب الأساسي مع المتغيرات العامة.
+    
+    Args:
+        request: كائن الطلب من FastAPI
+        extra: قاموس إضافي للدمج مع السياق الأساسي
+        
+    Returns:
+        قاموس السياق الكامل للقالب
+    """
+    # استخدام الدالة المساعدة من ملف الإعدادات
+    template_settings = get_template_settings()
+    
+    # السياق الأساسي
     context = {
         "request": request,
-        "app_name": getattr(settings, "app_name", "AI Builder"),
-        "app_version": getattr(settings, "version", "1.0.0"),
-        "default_language": getattr(settings, "default_language", "ar"),
-        "default_theme": getattr(settings, "default_theme", "dark"),
+        **template_settings,  # دمج جميع إعدادات القالب
     }
+    
+    # دمج المتغيرات الإضافية
     if extra:
         context.update(extra)
+    
     return context
+
+
+# ===== وظيفة مساعدة لإنشاء رابط Google OAuth =====
+def get_google_auth_url(request: Request) -> tuple[str, bool]:
+    """
+    إنشاء رابط Google OAuth والتحقق من التهيئة.
+    
+    Returns:
+        tuple: (google_auth_url, google_configured)
+    """
+    google_auth_url = ""
+    google_configured = settings.google_configured
+    
+    if google_configured:
+        try:
+            state = create_signed_payload({"nonce": "google_login"})
+            request.session["oauth_state"] = state
+            google_auth_url = AuthService.get_google_auth_url(state)
+            print(f"✅ Google OAuth URL generated successfully")
+        except Exception as e:
+            print(f"⚠️ خطأ في إنشاء رابط Google: {e}")
+            google_configured = False
+            # محاولة الحصول على الرابط بدون session
+            try:
+                google_auth_url = AuthService.get_google_auth_url("")
+            except:
+                pass
+    
+    return google_auth_url, google_configured
 
 
 @router.get("/login")
 async def login_page(request: Request, user: CurrentUser = None):
-    """عرض صفحة تسجيل الدخول."""
+    """
+    عرض صفحة تسجيل الدخول.
+    
+    Args:
+        request: كائن الطلب
+        user: المستخدم الحالي (إذا كان مسجلاً)
+        
+    Returns:
+        TemplateResponse أو RedirectResponse
+    """
     # إذا كان المستخدم مسجلاً بالفعل، إعادة توجيه إلى لوحة التحكم
     if user:
         return RedirectResponse(url="/dashboard", status_code=302)
     
     # تجهيز بيانات Google
-    google_auth_url = ""
-    google_configured = False
-    
-    try:
-        # التحقق من تهيئة Google
-        if hasattr(settings, 'google_client_id') and hasattr(settings, 'google_client_secret'):
-            if settings.google_client_id and settings.google_client_secret:
-                google_configured = True
-                state = create_signed_payload({"nonce": "google_login"})
-                request.session["oauth_state"] = state
-                google_auth_url = AuthService.get_google_auth_url(state)
-                print(f"✅ Google OAuth configured: {google_auth_url[:50]}...")
-    except Exception as e:
-        print(f"⚠️ خطأ في إعدادات Google: {e}")
-        google_configured = False
+    google_auth_url, google_configured = get_google_auth_url(request)
     
     # بناء سياق القالب
     context = get_template_context(request, {
         "google_auth_url": google_auth_url,
-        "google_configured": bool(google_configured),  # تحويل صريح إلى bool
+        "google_configured": google_configured,
+        "page_title": "تسجيل الدخول",
     })
     
     # عرض صفحة تسجيل الدخول مع معالجة الأخطاء
     try:
         return templates.TemplateResponse("auth/login.html", context)
     except TypeError as e:
-        print(f"❌ خطأ في TemplateResponse: {e}")
-        # محاولة بديلة بدون المتغيرات العامة
-        return templates.TemplateResponse(
-            "auth/login.html", 
-            {
-                "request": request,
-                "google_auth_url": google_auth_url,
-                "google_configured": False,
-                "app_name": getattr(settings, "app_name", "AI Builder"),
-            }
-        )
+        print(f"❌ خطأ في TemplateResponse (TypeError): {e}")
+        # محاولة بديلة بدون المتغيرات العامة المعقدة
+        try:
+            return templates.TemplateResponse(
+                "auth/login.html", 
+                {
+                    "request": request,
+                    "google_auth_url": google_auth_url,
+                    "google_configured": False,
+                    "app_name": settings.app_name,
+                    "app_version": getattr(settings, "version", "1.0.0"),
+                    "default_language": settings.default_language,
+                    "default_theme": settings.default_theme,
+                    "page_title": "تسجيل الدخول",
+                }
+            )
+        except Exception as e2:
+            print(f"❌ خطأ في المحاولة الثانية: {e2}")
+            # محاولة ثالثة بسيطة جداً
+            return templates.TemplateResponse(
+                "auth/login.html", 
+                {
+                    "request": request,
+                    "google_auth_url": "",
+                    "google_configured": False,
+                    "app_name": "AI Builder",
+                }
+            )
     except Exception as e:
-        print(f"❌ خطأ غير متوقع: {e}")
+        print(f"❌ خطأ غير متوقع في TemplateResponse: {e}")
         # عرض صفحة خطأ بسيطة
-        return templates.TemplateResponse(
-            "auth/login.html", 
-            {
-                "request": request,
-                "google_auth_url": "",
-                "google_configured": False,
-                "app_name": "AI Builder",
-            }
-        )
+        try:
+            return templates.TemplateResponse(
+                "auth/login.html", 
+                {
+                    "request": request,
+                    "google_auth_url": "",
+                    "google_configured": False,
+                    "app_name": "AI Builder",
+                }
+            )
+        except:
+            # في حالة فشل كل شيء، إعادة توجيه بسيطة
+            return RedirectResponse(url="/", status_code=302)
 
 
 @router.get("/google/callback")
@@ -114,11 +178,24 @@ async def google_callback(
     error: str = "",
     db: AsyncSession = Depends(get_db)
 ):
-    """معالج رد Google OAuth."""
+    """
+    معالج رد Google OAuth.
+    
+    Args:
+        request: كائن الطلب
+        code: رمز التفويض من Google
+        state: حالة الأمان من Google
+        error: رسالة الخطأ (إن وجدت)
+        db: جلسة قاعدة البيانات
+        
+    Returns:
+        RedirectResponse
+    """
     # التحقق من وجود أخطاء
     if error:
         print(f"⚠️ Google OAuth error: {error}")
         return RedirectResponse(url="/auth/login?error=google_denied", status_code=302)
+    
     if not code or not state:
         print("⚠️ Missing code or state parameters")
         return RedirectResponse(url="/auth/login?error=missing_params", status_code=302)
@@ -126,7 +203,7 @@ async def google_callback(
     # التحقق من حالة OAuth
     stored_state = request.session.get("oauth_state")
     if not stored_state or stored_state != state:
-        print("⚠️ OAuth state mismatch")
+        print(f"⚠️ OAuth state mismatch: stored={stored_state[:20] if stored_state else 'None'}, received={state[:20]}")
         return RedirectResponse(url="/auth/login?error=state_mismatch", status_code=302)
     
     # التحقق من صحة التوقيع
@@ -146,6 +223,7 @@ async def google_callback(
     try:
         auth_service = AuthService(db)
         user_id = await auth_service.login_with_google(code)
+        
         if not user_id:
             print("⚠️ Google login failed - no user ID returned")
             return RedirectResponse(url="/auth/login?error=login_failed", status_code=302)
@@ -162,6 +240,11 @@ async def google_callback(
             ip=request.client.host if request.client else None,
             ua=request.headers.get("user-agent"),
         )
+        
+        if not token:
+            print("⚠️ Session creation failed - no token returned")
+            return RedirectResponse(url="/auth/login?error=login_failed", status_code=302)
+            
         print("✅ Session created successfully")
     except Exception as e:
         print(f"⚠️ Session creation error: {e}")
@@ -184,7 +267,7 @@ async def google_callback(
     # إضافة الكوكي مع معالجة الأخطاء
     try:
         response.set_cookie(**cookie_settings)
-        print("✅ Cookie set successfully")
+        print(f"✅ Cookie set successfully: {settings.session_cookie_name}")
     except Exception as e:
         print(f"⚠️ Cookie setting error: {e}")
     
@@ -197,14 +280,27 @@ async def logout(
     user: CurrentUser = None,
     db: AsyncSession = Depends(get_db)
 ):
-    """تسجيل الخروج."""
+    """
+    تسجيل الخروج.
+    
+    Args:
+        request: كائن الطلب
+        user: المستخدم الحالي
+        db: جلسة قاعدة البيانات
+        
+    Returns:
+        RedirectResponse
+    """
     token = request.cookies.get(settings.session_cookie_name)
     
     if token:
         try:
             auth_service = AuthService(db)
-            await auth_service.delete_session(token)
-            print("✅ Session deleted successfully")
+            success = await auth_service.delete_session(token)
+            if success:
+                print("✅ Session deleted successfully")
+            else:
+                print("⚠️ Session deletion failed or session not found")
         except Exception as e:
             print(f"⚠️ Session deletion error: {e}")
     
@@ -223,23 +319,64 @@ async def logout(
 # ===== راوت إضافي للتحقق من صحة القوالب =====
 @router.get("/debug/templates")
 async def debug_templates(request: Request):
-    """راوت للتحقق من القوالب (للتطوير فقط)."""
+    """
+    راوت للتحقق من القوالب (للتطوير فقط).
+    
+    Returns:
+        JSON مع معلومات التصحيح
+    """
     try:
         # محاولة تحميل القالب
         template = templates.get_template("auth/login.html")
+        
+        # الحصول على إعدادات القالب
+        template_settings = get_template_settings()
+        
         return {
             "status": "success",
             "template": "auth/login.html",
             "template_exists": True,
             "templates_dir": str(TEMPLATES_DIR),
-            "google_configured": bool(getattr(settings, "google_configured", False)),
-            "app_name": getattr(settings, "app_name", "AI Builder"),
+            "settings": template_settings,
+            "google_configured": bool(settings.google_configured),
+            "app_name": settings.app_name,
+            "session_cookie_name": settings.session_cookie_name,
+            "debug": settings.debug,
         }
     except Exception as e:
         return {
             "status": "error",
             "error": str(e),
+            "error_type": type(e).__name__,
             "templates_dir": str(TEMPLATES_DIR),
             "template_exists": (TEMPLATES_DIR / "auth" / "login.html").exists(),
-            "google_configured": bool(getattr(settings, "google_configured", False)),
+            "base_exists": (TEMPLATES_DIR / "base.html").exists(),
+            "google_configured": bool(settings.google_configured),
         }
+
+
+# ===== راوت للتحقق من صحة الإعدادات =====
+@router.get("/debug/settings")
+async def debug_settings():
+    """
+    راوت لعرض الإعدادات (للتطوير فقط).
+    
+    Returns:
+        JSON مع معلومات الإعدادات (مع إخفاء المعلومات الحساسة)
+    """
+    return {
+        "app_name": settings.app_name,
+        "debug": settings.debug,
+        "google_configured": settings.google_configured,
+        "default_language": settings.default_language,
+        "default_theme": settings.default_theme,
+        "database_url": settings.database_url.split("@")[0] + "@..." if "@" in settings.database_url else "configured",
+        "has_google_client_id": bool(settings.google_client_id),
+        "has_google_client_secret": bool(settings.google_client_secret),
+        "session_cookie_name": settings.session_cookie_name,
+        "cors_origins": settings.cors_origin_list,
+        "rate_limit_enabled": settings.rate_limit_enabled,
+        "ai_configured": settings.ai_configured,
+        "rag_enabled": settings.rag_enabled,
+        "docker_enabled": settings.docker_enabled,
+    }
