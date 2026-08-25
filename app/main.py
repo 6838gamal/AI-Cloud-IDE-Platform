@@ -28,7 +28,7 @@ class AuthMiddleware(BaseHTTPMiddleware):
         request.state.db = None
         request.state.user = None
 
-        public_paths = ("/auth", "app/static", "/api/health", "/favicon.ico")
+        public_paths = ("/auth", "/app/static", "/api/health", "/favicon.ico")
         if any(request.url.path.startswith(p) for p in public_paths):
             return await call_next(request)
 
@@ -86,9 +86,9 @@ app = FastAPI(
 app.add_middleware(SessionMiddleware, secret_key=settings.session_secret)
 app.add_middleware(AuthMiddleware)
 
-app.mount("static", StaticFiles(directory="app/static"), name="static")
+app.mount("static", StaticFiles(directory="/app/static"), name="static")
 
-templates = Jinja2Templates(directory="app/templates")
+templates = Jinja2Templates(directory="/app/templates")
 templates.env.globals["app_name"] = settings.app_name
 templates.env.globals["default_language"] = settings.default_language
 templates.env.globals["default_theme"] = settings.default_theme
