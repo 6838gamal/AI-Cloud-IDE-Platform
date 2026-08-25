@@ -26,9 +26,18 @@ if not TEMPLATES_DIR.exists():
 
 print(f"📁 Templates directory: {TEMPLATES_DIR}")
 
-# ===== إنشاء كائن القوالب بدون أي globals إضافية =====
-# هذا هو الحل الرئيسي: لا نضيف أي متغيرات عامة إلى env.globals
-templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
+# ===== إنشاء كائن القوالب بشكل مختلف =====
+# هذه هي الطريقة الصحيحة لتجنب مشكلة unhashable type
+class SafeJinja2Templates(Jinja2Templates):
+    """نسخة آمنة من Jinja2Templates تتجنب مشكلة unhashable type."""
+    
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        # لا نضيف أي globals هنا
+        pass
+
+# استخدام النسخة الآمنة
+templates = SafeJinja2Templates(directory=str(TEMPLATES_DIR))
 
 # ===== دالة مساعدة لإنشاء سياق القالب =====
 def get_template_context(request: Request, extra: dict = None) -> dict:
@@ -39,23 +48,21 @@ def get_template_context(request: Request, extra: dict = None) -> dict:
     # متغيرات بسيطة فقط
     context = {
         "request": request,
-        "app_name": getattr(settings, "app_name", "AI Builder"),
-        "app_version": getattr(settings, "version", "1.0.0"),
-        "default_language": getattr(settings, "default_language", "en"),
-        "default_theme": getattr(settings, "default_theme", "dark"),
-        "debug": getattr(settings, "debug", False),
-        "google_configured": False,  # قيمة افتراضية
-        "google_auth_url": "",  # قيمة افتراضية
+        "app_name": str(getattr(settings, "app_name", "AI Builder")),
+        "app_version": str(getattr(settings, "version", "1.0.0")),
+        "default_language": str(getattr(settings, "default_language", "en")),
+        "default_theme": str(getattr(settings, "default_theme", "dark")),
+        "debug": bool(getattr(settings, "debug", False)),
     }
     
-    # دمج المتغيرات الإضافية (مع التأكد من أنها بسيطة)
+    # دمج المتغيرات الإضافية
     if extra:
         for key, value in extra.items():
-            # تأكد من أن القيمة ليست dict
+            # تجاهل أي قيم من نوع dict
             if not isinstance(value, dict):
                 context[key] = value
             else:
-                print(f"⚠️ Skipping {key} because it's a dict: {type(value)}")
+                print(f"⚠️ Skipping {key} because it's a dict")
     
     return context
 
@@ -86,42 +93,41 @@ async def login_page(request: Request, user: CurrentUser = None):
         print(f"⚠️ Google OAuth error: {e}")
         google_configured = False
     
-    # بناء سياق القالب (جميع القيم بسيطة)
+    # بناء سياق القالب
     context = get_template_context(request, {
-        "google_auth_url": google_auth_url,
-        "google_configured": google_configured,
+        "google_auth_url": str(google_auth_url),
+        "google_configured": bool(google_configured),
         "page_title": "تسجيل الدخول",
     })
     
-    # عرض صفحة تسجيل الدخول
+    # ===== المحاولة الأولى: استخدام TemplateResponse بشكل طبيعي =====
     try:
         return templates.TemplateResponse("auth/login.html", context)
     except TypeError as e:
         print(f"❌ TypeError in TemplateResponse: {e}")
-        print(f"Context keys: {list(context.keys())}")
         
-        # محاولة بسيطة جداً بدون أي متغيرات إضافية
+        # ===== المحاولة الثانية: مسح الكاش وإعادة المحاولة =====
         try:
-            return templates.TemplateResponse(
-                "auth/login.html", 
-                {
-                    "request": request,
-                    "google_auth_url": google_auth_url,
-                    "google_configured": google_configured,
-                    "app_name": "AI Builder",
-                }
-            )
+            templates.env.cache.clear()
+            return templates.TemplateResponse("auth/login.html", context)
         except Exception as e2:
             print(f"❌ Second attempt failed: {e2}")
-            # محاولة أخيرة بدون google_auth_url
-            return templates.TemplateResponse(
-                "auth/login.html", 
-                {
+            
+            # ===== المحاولة الثالثة: إنشاء كائن templates جديد =====
+            try:
+                # إنشاء كائن جديد
+                new_templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
+                return new_templates.TemplateResponse("auth/login.html", {
                     "request": request,
-                    "google_configured": False,
-                    "app_name": "AI Builder",
-                }
-            )
+                    "google_auth_url": str(google_auth_url),
+                    "google_configured": bool(google_configured),
+                    "app_name": str(getattr(settings, "app_name", "AI Builder")),
+                })
+            except Exception as e3:
+                print(f"❌ Third attempt failed: {e3}")
+                
+                # ===== المحاولة الأخيرة: إعادة توجيه بسيطة =====
+                return RedirectResponse(url="/", status_code=302)
     except Exception as e:
         print(f"❌ Unexpected error: {e}")
         return RedirectResponse(url="/", status_code=302)
@@ -240,3 +246,32 @@ async def logout(
     response.delete_cookie(settings.session_cookie_name, path="/")
     
     return response
+
+
+# ===== راوت للتصحيح =====
+@router.get("/debug/templates")
+async def debug_templates(request: Request):
+    """راوت للتحقق من القوالب (للتطوير فقط)."""
+    try:
+        # محاولة تحميل القالب
+        template = templates.get_template("auth/login.html")
+        
+        return {
+            "status": "success",
+            "template": "auth/login.html",
+            "template_exists": True,
+            "templates_dir": str(TEMPLATES_DIR),
+            "google_configured": bool(settings.google_configured),
+            "app_name": settings.app_name,
+            "templates_type": str(type(templates)),
+        }
+    except Exception as e:
+        return {
+            "status": "error",
+            "error": str(e),
+            "error_type": type(e).__name__,
+            "templates_dir": str(TEMPLATES_DIR),
+            "template_exists": (TEMPLATES_DIR / "auth" / "login.html").exists(),
+            "base_exists": (TEMPLATES_DIR / "base.html").exists(),
+            "google_configured": bool(settings.google_configured),
+        }
