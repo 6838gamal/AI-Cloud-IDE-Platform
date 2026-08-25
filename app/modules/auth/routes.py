@@ -2,9 +2,10 @@
 from __future__ import annotations
 
 from fastapi import APIRouter, Request, Depends
-from fastapi.responses import RedirectResponse
+from fastapi.responses import RedirectResponse, HTMLResponse
 from fastapi.templating import Jinja2Templates
 from sqlalchemy.ext.asyncio import AsyncSession
+from jinja2 import Environment, FileSystemLoader, select_autoescape
 
 from app.common.security import create_signed_payload, verify_signed_payload
 from app.config import settings
@@ -14,65 +15,57 @@ from app.modules.auth.services import AuthService
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
-# ===== تحديد مسار القوالب بشكل بسيط =====
+# ===== تحديد مسار القوالب =====
 from pathlib import Path
 
-# مسار القوالب
 TEMPLATES_DIR = Path(__file__).resolve().parent.parent.parent / "templates"
 
-# إذا لم يكن موجوداً، جرب مساراً آخر
 if not TEMPLATES_DIR.exists():
     TEMPLATES_DIR = Path(__file__).resolve().parent.parent / "templates"
 
 print(f"📁 Templates directory: {TEMPLATES_DIR}")
 
-# ===== إنشاء كائن القوالب بشكل مختلف =====
+# ===== إنشاء بيئة Jinja2 يدوياً =====
 # هذه هي الطريقة الصحيحة لتجنب مشكلة unhashable type
-class SafeJinja2Templates(Jinja2Templates):
-    """نسخة آمنة من Jinja2Templates تتجنب مشكلة unhashable type."""
-    
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        # لا نضيف أي globals هنا
-        pass
+env = Environment(
+    loader=FileSystemLoader(str(TEMPLATES_DIR)),
+    autoescape=select_autoescape(['html', 'xml']),
+    enable_async=True,
+    cache_size=0,  # تعطيل الكاش تماماً
+)
 
-# استخدام النسخة الآمنة
-templates = SafeJinja2Templates(directory=str(TEMPLATES_DIR))
+# ===== إنشاء كائن Jinja2Templates باستخدام البيئة المخصصة =====
+templates = Jinja2Templates(env=env)
+
 
 # ===== دالة مساعدة لإنشاء سياق القالب =====
 def get_template_context(request: Request, extra: dict = None) -> dict:
-    """
-    إنشاء سياق القالب مع المتغيرات المطلوبة.
-    جميع القيم هنا هي من أنواع بسيطة (str, bool, int) وليس dict.
-    """
-    # متغيرات بسيطة فقط
+    """إنشاء سياق القالب مع المتغيرات المطلوبة."""
     context = {
         "request": request,
-        "app_name": str(getattr(settings, "app_name", "AI Builder")),
+        "app_name": str(settings.app_name),
         "app_version": str(getattr(settings, "version", "1.0.0")),
-        "default_language": str(getattr(settings, "default_language", "en")),
-        "default_theme": str(getattr(settings, "default_theme", "dark")),
-        "debug": bool(getattr(settings, "debug", False)),
+        "default_language": str(settings.default_language),
+        "default_theme": str(settings.default_theme),
+        "debug": bool(settings.debug),
+        "google_configured": False,
+        "google_auth_url": "",
     }
     
-    # دمج المتغيرات الإضافية
     if extra:
+        # إضافة المتغيرات الإضافية مع التأكد من أنها بسيطة
         for key, value in extra.items():
-            # تجاهل أي قيم من نوع dict
-            if not isinstance(value, dict):
+            if not isinstance(value, (dict, list, set)):
                 context[key] = value
             else:
-                print(f"⚠️ Skipping {key} because it's a dict")
+                print(f"⚠️ Skipping {key} because it's not hashable: {type(value)}")
     
     return context
 
 
 @router.get("/login")
 async def login_page(request: Request, user: CurrentUser = None):
-    """
-    عرض صفحة تسجيل الدخول.
-    """
-    # إذا كان المستخدم مسجلاً بالفعل، إعادة توجيه إلى لوحة التحكم
+    """عرض صفحة تسجيل الدخول."""
     if user:
         return RedirectResponse(url="/dashboard", status_code=302)
     
@@ -81,7 +74,6 @@ async def login_page(request: Request, user: CurrentUser = None):
     google_configured = False
     
     try:
-        # التحقق من تهيئة Google
         if hasattr(settings, 'google_client_id') and hasattr(settings, 'google_client_secret'):
             if settings.google_client_id and settings.google_client_secret:
                 google_configured = True
@@ -93,44 +85,40 @@ async def login_page(request: Request, user: CurrentUser = None):
         print(f"⚠️ Google OAuth error: {e}")
         google_configured = False
     
-    # بناء سياق القالب
+    # بناء السياق
     context = get_template_context(request, {
         "google_auth_url": str(google_auth_url),
         "google_configured": bool(google_configured),
         "page_title": "تسجيل الدخول",
     })
     
-    # ===== المحاولة الأولى: استخدام TemplateResponse بشكل طبيعي =====
+    # عرض القالب مع معالجة الأخطاء
     try:
+        # استخدام TemplateResponse مع السياق
         return templates.TemplateResponse("auth/login.html", context)
-    except TypeError as e:
-        print(f"❌ TypeError in TemplateResponse: {e}")
+    except Exception as e:
+        print(f"❌ Error in TemplateResponse: {e}")
         
-        # ===== المحاولة الثانية: مسح الكاش وإعادة المحاولة =====
+        # محاولة بديلة: استخدام HTMLResponse مباشرة
         try:
-            templates.env.cache.clear()
-            return templates.TemplateResponse("auth/login.html", context)
+            template = env.get_template("auth/login.html")
+            html_content = await template.render_async(**context)
+            return HTMLResponse(content=html_content)
         except Exception as e2:
             print(f"❌ Second attempt failed: {e2}")
             
-            # ===== المحاولة الثالثة: إنشاء كائن templates جديد =====
-            try:
-                # إنشاء كائن جديد
-                new_templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
-                return new_templates.TemplateResponse("auth/login.html", {
-                    "request": request,
-                    "google_auth_url": str(google_auth_url),
-                    "google_configured": bool(google_configured),
-                    "app_name": str(getattr(settings, "app_name", "AI Builder")),
-                })
-            except Exception as e3:
-                print(f"❌ Third attempt failed: {e3}")
-                
-                # ===== المحاولة الأخيرة: إعادة توجيه بسيطة =====
-                return RedirectResponse(url="/", status_code=302)
-    except Exception as e:
-        print(f"❌ Unexpected error: {e}")
-        return RedirectResponse(url="/", status_code=302)
+            # المحاولة الأخيرة: عرض صفحة بسيطة
+            return HTMLResponse(content="""
+            <!DOCTYPE html>
+            <html>
+            <head><title>Login</title></head>
+            <body>
+                <h1>Login Page</h1>
+                <p>Google OAuth: Not Configured</p>
+                <a href="/">Go Home</a>
+            </body>
+            </html>
+            """)
 
 
 @router.get("/google/callback")
@@ -142,7 +130,6 @@ async def google_callback(
     db: AsyncSession = Depends(get_db)
 ):
     """معالج رد Google OAuth."""
-    # التحقق من وجود أخطاء
     if error:
         print(f"⚠️ Google OAuth error: {error}")
         return RedirectResponse(url="/auth/login?error=google_denied", status_code=302)
@@ -151,13 +138,11 @@ async def google_callback(
         print("⚠️ Missing code or state parameters")
         return RedirectResponse(url="/auth/login?error=missing_params", status_code=302)
 
-    # التحقق من حالة OAuth
     stored_state = request.session.get("oauth_state")
     if not stored_state or stored_state != state:
         print(f"⚠️ OAuth state mismatch")
         return RedirectResponse(url="/auth/login?error=state_mismatch", status_code=302)
     
-    # التحقق من صحة التوقيع
     try:
         verified = verify_signed_payload(state, max_age=600)
         if not verified:
@@ -167,10 +152,8 @@ async def google_callback(
         print(f"⚠️ State verification error: {e}")
         return RedirectResponse(url="/auth/login?error=invalid_state", status_code=302)
 
-    # حذف حالة OAuth من الجلسة
     request.session.pop("oauth_state", None)
     
-    # تسجيل الدخول باستخدام Google
     try:
         auth_service = AuthService(db)
         user_id = await auth_service.login_with_google(code)
@@ -184,7 +167,6 @@ async def google_callback(
         print(f"⚠️ Google login exception: {e}")
         return RedirectResponse(url="/auth/login?error=login_failed", status_code=302)
 
-    # إنشاء جلسة جديدة
     try:
         token = await auth_service.create_session(
             user_id=user_id,
@@ -201,10 +183,8 @@ async def google_callback(
         print(f"⚠️ Session creation error: {e}")
         return RedirectResponse(url="/auth/login?error=login_failed", status_code=302)
     
-    # إنشاء استجابة مع كوكي الجلسة
     response = RedirectResponse(url="/dashboard", status_code=302)
     
-    # إعدادات الكوكي
     cookie_settings = {
         "key": settings.session_cookie_name,
         "value": token,
@@ -215,7 +195,6 @@ async def google_callback(
         "path": "/",
     }
     
-    # إضافة الكوكي مع معالجة الأخطاء
     try:
         response.set_cookie(**cookie_settings)
         print(f"✅ Cookie set successfully")
@@ -251,10 +230,10 @@ async def logout(
 # ===== راوت للتصحيح =====
 @router.get("/debug/templates")
 async def debug_templates(request: Request):
-    """راوت للتحقق من القوالب (للتطوير فقط)."""
+    """راوت للتحقق من القوالب."""
     try:
-        # محاولة تحميل القالب
-        template = templates.get_template("auth/login.html")
+        # محاولة تحميل القالب باستخدام البيئة المخصصة
+        template = env.get_template("auth/login.html")
         
         return {
             "status": "success",
@@ -263,7 +242,8 @@ async def debug_templates(request: Request):
             "templates_dir": str(TEMPLATES_DIR),
             "google_configured": bool(settings.google_configured),
             "app_name": settings.app_name,
-            "templates_type": str(type(templates)),
+            "env_type": str(type(env)),
+            "cache_size": env.cache.size if hasattr(env.cache, 'size') else "unknown",
         }
     except Exception as e:
         return {
@@ -273,5 +253,4 @@ async def debug_templates(request: Request):
             "templates_dir": str(TEMPLATES_DIR),
             "template_exists": (TEMPLATES_DIR / "auth" / "login.html").exists(),
             "base_exists": (TEMPLATES_DIR / "base.html").exists(),
-            "google_configured": bool(settings.google_configured),
         }
