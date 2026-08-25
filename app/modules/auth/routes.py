@@ -13,6 +13,12 @@ from app.modules.auth.services import AuthService
 router = APIRouter(prefix="/auth", tags=["auth"])
 templates = Jinja2Templates(directory="templates")
 
+# ✅ إضافة متغيرات عامة للقوالب (حل شامل)
+templates.env.globals.update({
+    "app_name": getattr(settings, "app_name", "AI Builder"),
+    "app_version": getattr(settings, "version", "1.0.0"),
+})
+
 
 @router.get("/login")
 async def login_page(request: Request, user: CurrentUser):
@@ -23,6 +29,8 @@ async def login_page(request: Request, user: CurrentUser):
         state = create_signed_payload({"nonce": "google_login"})
         request.session["oauth_state"] = state
         google_auth_url = AuthService.get_google_auth_url(state)
+    
+    # ✅ الآن不需要 تمرير app_name لأنها موجودة في المتغيرات العامة
     return templates.TemplateResponse("auth/login.html", {
         "request": request,
         "google_auth_url": google_auth_url,
