@@ -1,6 +1,7 @@
 """Auth routes: Google OAuth login/callback, logout."""
 from __future__ import annotations
 
+import json
 from fastapi import APIRouter, Request, Depends
 from fastapi.responses import RedirectResponse, HTMLResponse
 from fastapi.templating import Jinja2Templates
@@ -26,7 +27,6 @@ if not TEMPLATES_DIR.exists():
 print(f"📁 Templates directory: {TEMPLATES_DIR}")
 
 # ===== إنشاء بيئة Jinja2 يدوياً =====
-# هذه هي الطريقة الصحيحة لتجنب مشكلة unhashable type
 env = Environment(
     loader=FileSystemLoader(str(TEMPLATES_DIR)),
     autoescape=select_autoescape(['html', 'xml']),
@@ -53,7 +53,6 @@ def get_template_context(request: Request, extra: dict = None) -> dict:
     }
     
     if extra:
-        # إضافة المتغيرات الإضافية مع التأكد من أنها بسيطة
         for key, value in extra.items():
             if not isinstance(value, (dict, list, set)):
                 context[key] = value
@@ -63,13 +62,9 @@ def get_template_context(request: Request, extra: dict = None) -> dict:
     return context
 
 
-@router.get("/login")
-async def login_page(request: Request, user: CurrentUser = None):
-    """عرض صفحة تسجيل الدخول."""
-    if user:
-        return RedirectResponse(url="/dashboard", status_code=302)
-    
-    # تجهيز بيانات Google
+# ===== دالة مساعدة لإنشاء رابط Google =====
+def get_google_auth_url(request: Request) -> tuple[str, bool]:
+    """إنشاء رابط Google OAuth."""
     google_auth_url = ""
     google_configured = False
     
@@ -77,13 +72,34 @@ async def login_page(request: Request, user: CurrentUser = None):
         if hasattr(settings, 'google_client_id') and hasattr(settings, 'google_client_secret'):
             if settings.google_client_id and settings.google_client_secret:
                 google_configured = True
-                state = create_signed_payload({"nonce": "google_login"})
+                # تأكد من أن state هو نص
+                state_payload = {"nonce": "google_login"}
+                state = create_signed_payload(state_payload)
+                
+                # تأكد من أن state هو نص
+                if isinstance(state, dict):
+                    state = json.dumps(state)
+                elif not isinstance(state, str):
+                    state = str(state)
+                
                 request.session["oauth_state"] = state
                 google_auth_url = AuthService.get_google_auth_url(state)
-                print("✅ Google OAuth URL generated successfully")
+                print(f"✅ Google OAuth URL generated: {google_auth_url[:50]}...")
     except Exception as e:
         print(f"⚠️ Google OAuth error: {e}")
         google_configured = False
+    
+    return google_auth_url, google_configured
+
+
+@router.get("/login")
+async def login_page(request: Request, user: CurrentUser = None):
+    """عرض صفحة تسجيل الدخول."""
+    if user:
+        return RedirectResponse(url="/dashboard", status_code=302)
+    
+    # تجهيز بيانات Google
+    google_auth_url, google_configured = get_google_auth_url(request)
     
     # بناء السياق
     context = get_template_context(request, {
@@ -92,9 +108,8 @@ async def login_page(request: Request, user: CurrentUser = None):
         "page_title": "تسجيل الدخول",
     })
     
-    # عرض القالب مع معالجة الأخطاء
+    # عرض القالب
     try:
-        # استخدام TemplateResponse مع السياق
         return templates.TemplateResponse("auth/login.html", context)
     except Exception as e:
         print(f"❌ Error in TemplateResponse: {e}")
@@ -105,16 +120,17 @@ async def login_page(request: Request, user: CurrentUser = None):
             html_content = await template.render_async(**context)
             return HTMLResponse(content=html_content)
         except Exception as e2:
-            print(f"❌ Second attempt failed: {e2}")
+            print(f"❌ HTMLResponse attempt failed: {e2}")
             
-            # المحاولة الأخيرة: عرض صفحة بسيطة
-            return HTMLResponse(content="""
+            # صفحة بسيطة
+            return HTMLResponse(content=f"""
             <!DOCTYPE html>
             <html>
             <head><title>Login</title></head>
             <body>
                 <h1>Login Page</h1>
-                <p>Google OAuth: Not Configured</p>
+                <p>Google OAuth: {'✅ Configured' if google_configured else '❌ Not Configured'}</p>
+                <p>Google Auth URL: {google_auth_url[:100] if google_auth_url else 'Not available'}</p>
                 <a href="/">Go Home</a>
             </body>
             </html>
@@ -130,6 +146,12 @@ async def google_callback(
     db: AsyncSession = Depends(get_db)
 ):
     """معالج رد Google OAuth."""
+    # تأكد من أن state هو نص
+    if isinstance(state, dict):
+        state = json.dumps(state)
+    elif not isinstance(state, str):
+        state = str(state)
+    
     if error:
         print(f"⚠️ Google OAuth error: {error}")
         return RedirectResponse(url="/auth/login?error=google_denied", status_code=302)
@@ -232,7 +254,6 @@ async def logout(
 async def debug_templates(request: Request):
     """راوت للتحقق من القوالب."""
     try:
-        # محاولة تحميل القالب باستخدام البيئة المخصصة
         template = env.get_template("auth/login.html")
         
         return {
@@ -243,7 +264,6 @@ async def debug_templates(request: Request):
             "google_configured": bool(settings.google_configured),
             "app_name": settings.app_name,
             "env_type": str(type(env)),
-            "cache_size": env.cache.size if hasattr(env.cache, 'size') else "unknown",
         }
     except Exception as e:
         return {
