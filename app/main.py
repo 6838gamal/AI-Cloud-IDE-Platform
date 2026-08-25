@@ -19,6 +19,19 @@ from app.config import settings
 from app.database import async_session_factory, init_db
 from app.modules.auth.services import AuthService
 
+# ===== تحديد المسارات - المجلدات داخل app =====
+# بما أن الملف موجود في app/main.py، نستخدم parent للوصول إلى مجلد app
+APP_DIR = Path(__file__).resolve().parent
+STATIC_DIR = APP_DIR / "static"
+TEMPLATES_DIR = APP_DIR / "templates"
+
+# ===== إنشاء المجلدات إذا لم تكن موجودة =====
+try:
+    STATIC_DIR.mkdir(parents=True, exist_ok=True)
+    TEMPLATES_DIR.mkdir(parents=True, exist_ok=True)
+except Exception as e:
+    print(f"⚠️ تحذير: لا يمكن إنشاء المجلدات: {e}")
+
 logging.basicConfig(level=getattr(logging, settings.log_level.upper(), logging.INFO))
 logger = logging.getLogger(__name__)
 
@@ -86,12 +99,25 @@ app = FastAPI(
 app.add_middleware(SessionMiddleware, secret_key=settings.session_secret)
 app.add_middleware(AuthMiddleware)
 
-app.mount("static", StaticFiles(directory="/static"), name="static")
+# ===== تحميل الملفات الثابتة =====
+if STATIC_DIR.exists() and STATIC_DIR.is_dir():
+    app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
+    logger.info(f"✅ تم تحميل الملفات الثابتة من: {STATIC_DIR}")
+else:
+    logger.warning(f"⚠️ مجلد الملفات الثابتة غير موجود: {STATIC_DIR}")
 
-templates = Jinja2Templates(directory="/templates")
-templates.env.globals["app_name"] = settings.app_name
-templates.env.globals["default_language"] = settings.default_language
-templates.env.globals["default_theme"] = settings.default_theme
+# ===== تحميل القوالب =====
+if TEMPLATES_DIR.exists() and TEMPLATES_DIR.is_dir():
+    templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
+    templates.env.globals["app_name"] = settings.app_name
+    templates.env.globals["default_language"] = settings.default_language
+    templates.env.globals["default_theme"] = settings.default_theme
+    logger.info(f"✅ تم تحميل القوالب من: {TEMPLATES_DIR}")
+else:
+    logger.warning(f"⚠️ مجلد القوالب غير موجود: {TEMPLATES_DIR}")
+    # إنشاء مجلد templates افتراضي إذا لم يكن موجوداً
+    TEMPLATES_DIR.mkdir(parents=True, exist_ok=True)
+    templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
 
 register_exception_handlers(app, templates)
 
